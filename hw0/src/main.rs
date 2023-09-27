@@ -1,7 +1,9 @@
 use anyhow::Result;
 use getopts::Options;
+use plotly::layout::AxisType;
 use regex::Regex;
 use rust_stemmers::{Algorithm, Stemmer};
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 struct Config {
@@ -13,7 +15,7 @@ struct Config {
 
 fn main() {
     let config = parse_args().unwrap();
-    let mut data = std::fs::read_to_string(config.file).unwrap();
+    let data = std::fs::read_to_string(config.file).unwrap();
     let re = Regex::new(r"[^\w\s\d']").unwrap();
     let stop: HashSet<_> = stop_words::get(stop_words::LANGUAGE::English)
         .into_iter()
@@ -24,30 +26,51 @@ fn main() {
     // Options that the user can control should include: lowercasing,
     // either stemming or lemmatization, stopword removal, and at least one additional
     // option you added.
-    if config.lower {
-        data.make_ascii_lowercase();
-    }
-    let data = if config.remove_punc {
-        re.replace_all(&data, "")
+    let mut data = if config.remove_punc {
+        match re.replace_all(&data, "") {
+            Cow::Borrowed(x) => x.to_string(),
+            Cow::Owned(x) => x,
+        }
     } else {
         todo!()
     };
+
+    if config.lower {
+        data.make_ascii_lowercase();
+    }
     let stemmer = Stemmer::create(Algorithm::English);
     let tokens = data.split_whitespace().filter(|&word| !stop.contains(word));
     let tokens: Vec<_> = if config.stem {
         tokens.map(|x| stemmer.stem(x)).collect()
     } else {
-        tokens.map(|x| std::borrow::Cow::Borrowed(x)).collect() // Keep types the same
+        tokens.map(|x| Cow::Borrowed(x)).collect() // Keep types the same
     };
     let mut counts: HashMap<_, u32> = HashMap::new();
     for token in tokens.iter() {
         *counts.entry(token).or_default() += 1;
     }
-    let mut output: Vec<_> = counts.into_iter().map(|(k, v)| (v, k)).collect();
+    let mut output: Vec<_> = counts.iter().map(|(k, v)| (*v, k)).collect();
     output.sort_by(|a, b| b.cmp(a));
-    for x in output.into_iter().skip(16).take(16) {
+    for x in output.iter().skip(16).take(16) {
         dbg!(x);
     }
+    let counts = output.iter().map(|(x, _)| x).copied().collect();
+    plot(counts);
+}
+
+fn plot(output: Vec<u32>) {
+    use plotly::common::Title;
+    use plotly::layout::{Axis, Layout};
+    use plotly::{Plot, Scatter};
+    let layout = Layout::new()
+        .title(Title::new("Token Analysis"))
+        .x_axis(Axis::new().title("Rank".into()))
+        .y_axis(Axis::new().type_(AxisType::Log).title("Token Count".into()));
+    let mut plot = Plot::new();
+    let trace = Scatter::new((1..=output.len()).collect(), output);
+    plot.add_trace(trace);
+    plot.set_layout(layout);
+    plot.write_html("plot.html");
 }
 
 fn parse_args() -> Result<Config> {
