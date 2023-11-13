@@ -1,2 +1,6 @@
 hw0/target/*
 hw0/*.txt
+hw1/*.table
+hw1/lda*
+hw1/*.tex
+hw2/*.wordvectors*
